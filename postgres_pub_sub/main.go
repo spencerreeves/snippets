@@ -1,58 +1,55 @@
 package main
 
 import (
-	"fmt"
-	"github.com/lib/pq"
+	"context"
+	"github.com/jackc/pgx"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"github.com/spencerreeves/snippets/postgres_pub_sub/notification"
+	"os"
+	"sync"
 	"time"
 )
 
-const connStr = "postgres://postgres@127.0.0.1:5432/spencerreeves?sslmode=disable"
-const psqlInfo = "dbname=spencerreeves user=postgres sslmode=disable"
-
 func main() {
-	fmt.Println("Start")
-	listener := pq.NewListener(psqlInfo, 10*time.Second, time.Minute, ReportProblem)
-	if err := listener.Listen("job_channel"); err != nil {
-		panic(err)
+	c, err := LoadConfig()
+
+	if c.Debug {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	}
+	if err != nil {
+		log.Panic().Err(err).Msg("unable to read config")
 	}
 
-	Simple(listener)
-	fmt.Println("End")
-}
+	connConfig, err := pgx.ParseConnectionString(c.DbUrl)
+	if err != nil {
+		log.Panic().Err(err).Msg("unable to read db config")
+	}
 
-func Simple(listener *pq.Listener) {
+	connPool, err := pgx.NewConnPool(pgx.ConnPoolConfig{
+		ConnConfig:     connConfig,
+		AfterConnect:   nil,
+		MaxConnections: 20,
+		AcquireTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		log.Panic().Err(err).Msg("unable to connect to db")
+	}
+
+	notificationRepo := notification.NewRepo(connPool)
+	notificationService := notification.NewService(notificationRepo, c.ChannelName)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		fmt.Println("inside")
-		for {
-			select {
-			case notification := <-listener.Notify:
-				fmt.Printf("Recieved postgres notification: %v\n", notification)
-			}
+		defer wg.Done()
+
+		// This is a blocking call that will run into there is an error in the notification stream
+		ctx := context.Background()
+		if err = notificationService.Start(ctx); err != nil {
+			log.Error().Err(err).Msg("error in notification service")
 		}
 	}()
-}
 
-func Complex() {
-	//db, _ := sqlx.Connect("postgres", connStr)
-	//const workerCount = 5
-	//// Create a pool of workers
-	//var wg sync.WaitGroup
-	//wg.Add(workerCount)
-	//
-	//fmt.Println("Starting listening service...")
-	//for i := 0; i < workerCount; i++ {
-	//	go func(i int) {
-	//		defer wg.Done()
-	//		fmt.Printf("Worker %v ")
-	//		val := slice[i]
-	//		fmt.Printf("i: %v, val: %v\n", i, val)
-	//	}(i)
-	//}
-	//wg.Wait()
-	//fmt.Println("Finished for loop")
-
-}
-
-func ReportProblem(event pq.ListenerEventType, err error) {
-	fmt.Printf("problem listening to `job_channel`: %v\n", err)
+	wg.Wait()
 }
