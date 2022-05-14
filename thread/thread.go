@@ -2,11 +2,16 @@ package thread
 
 import (
 	"github.com/google/uuid"
+	"sync"
 	"time"
 )
 
 type Thread struct {
-	ID             string
+	ID      string
+	Metrics *Metric
+}
+
+type Metric struct {
 	StartTime      time.Time
 	EndTime        time.Time
 	IdleDuration   time.Duration
@@ -15,41 +20,35 @@ type Thread struct {
 	ErrorCount     int
 }
 
-func Consumer[K](p *Pool[K]) *Thread {
+func Consumer[K any](wg *sync.WaitGroup, inputCh chan K, consumeFn func(*K) error, errFn func(*K, error)) *Thread {
 	thread := Thread{
-		ID: uuid.New().String(),
+		ID:      uuid.New().String(),
+		Metrics: &Metric{},
 	}
 
 	go func() {
-		defer p.waitGroup.Done()
-		thread.StartTime = time.Now()
-
+		defer wg.Done()
 		// Used to calculate idle and busy durations
 		t := time.Now()
-		for {
-			if p.closed {
-				thread.IdleDuration += time.Now().Sub(t)
-				thread.EndTime = time.Now()
-				return
+		thread.Metrics.StartTime = time.Now()
+
+		for elem := range inputCh {
+			thread.Metrics.IdleDuration += time.Now().Sub(t)
+
+			t = time.Now()
+			err := consumeFn(&elem)
+			thread.Metrics.ProcessedCount++
+			thread.Metrics.BusyDuration += time.Now().Sub(t)
+			if err != nil {
+				thread.Metrics.ErrorCount++
+				errFn(&elem, err)
 			}
 
-			select {
-			// Non-blocking call to get elem from channel
-			case elem := <-p.ConsumerChannel:
-				thread.IdleDuration += time.Now().Sub(t)
-
-				t = time.Now()
-				err := p.Consume(&elem)
-				thread.ProcessedCount++
-				thread.BusyDuration += time.Now().Sub(t)
-				if err != nil {
-					thread.ErrorCount++
-					p.OnError(&elem, err)
-				}
-
-				t = time.Now()
-			}
+			t = time.Now()
 		}
+
+		thread.Metrics.IdleDuration += time.Now().Sub(t)
+		thread.Metrics.EndTime = time.Now()
 	}()
 
 	return &thread
