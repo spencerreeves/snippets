@@ -10,6 +10,7 @@ type Pool[K any] struct {
 	Consume         func(elem *K) error
 	OnError         func(elem *K, e error)
 	Closed          bool
+	closeCh         chan struct{}
 	waitGroup       sync.WaitGroup
 	workers         []*Thread
 }
@@ -21,31 +22,35 @@ func NewPool[K any](count int, consumerChan chan K, consumerFn func(elem *K) err
 		Consume:         consumerFn,
 		OnError:         onError,
 		Closed:          false,
+		closeCh:         make(chan struct{}),
 	}
 
-	p.waitGroup.Add(count)
 	for i := 0; i < count; i++ {
-		p.workers = append(p.workers, Consumer[K](&p.waitGroup, consumerChan, consumerFn, onError))
+		p.workers = append(p.workers, Consumer[K](&p.waitGroup, p.closeCh, consumerChan, consumerFn, onError))
 	}
 
 	return &p
 }
 
-// Close Has side effects! Closes the channel and optionally waits for threads to indicate they have closed.
 func (p *Pool[K]) Close(block bool) error {
-	if !p.Closed {
-		close(p.ConsumerChannel)
+	if p.Closed {
+		return nil
+	} else {
+		for i := 0; i < p.Count; i++ {
+			p.closeCh <- struct{}{}
+		}
+	}
+
+	if block {
+		p.waitGroup.Wait()
+		close(p.closeCh)
 	}
 
 	p.Closed = true
-	if block {
-		p.waitGroup.Wait()
-	}
-
 	return nil
 }
 
-func (p *Pool[K]) Metrics(aggregated bool) []*Metric {
+func (p *Pool[K]) Metrics() []*Metric {
 	var metrics []*Metric
 	for _, w := range p.workers {
 		metrics = append(metrics, w.Metrics)
