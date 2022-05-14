@@ -13,11 +13,11 @@ var (
 )
 
 func TestConsumer(t *testing.T) {
-	cnt, errs, ch, wg := 0, 0, make(chan int), sync.WaitGroup{}
+	cnt, errs, closeCh, ch, wg := 0, 0, make(chan struct{}), make(chan int), sync.WaitGroup{}
 	var emptyTime time.Time
 
 	// Make sure we can create a Consumer
-	c := thread.Consumer(&wg, ch, incFn(&cnt), errCntFn(&errs))
+	c := thread.Consumer(&wg, closeCh, ch, incFn(&cnt), errCntFn(&errs))
 	if time.Now().Before(c.Metrics.StartTime) {
 		t.Error("invalid start time")
 		t.Fail()
@@ -32,7 +32,7 @@ func TestConsumer(t *testing.T) {
 	}
 
 	// Verify thread closes
-	close(ch)
+	closeCh <- struct{}{}
 	time.Sleep(time.Millisecond)
 	if c.Metrics.EndTime.Equal(emptyTime) {
 		t.Error("invalid end time metric")
@@ -47,19 +47,19 @@ func TestConsumer(t *testing.T) {
 	}
 
 	// Reset
-	ch2 := make(chan int)
-	c = thread.Consumer(&wg, ch2, alwaysErr, errCntFn(&errs))
+	cnt = 0
+	c = thread.Consumer(&wg, closeCh, ch, alwaysErr, errCntFn(&errs))
 
 	// Verify errorFn is called
-	ch2 <- 1
-	ch2 <- 1
+	ch <- 1
+	ch <- 1
 	time.Sleep(time.Millisecond)
 	if errs != 2 {
 		t.Error("invalid error count")
 		t.Fail()
 	}
 
-	close(ch2)
+	closeCh <- struct{}{}
 	time.Sleep(time.Millisecond)
 	if c.Metrics.ProcessedCount != 2 {
 		t.Error("invalid processed metric, expected 2")
