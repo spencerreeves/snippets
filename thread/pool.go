@@ -7,15 +7,15 @@ import (
 type Pool[K any] struct {
 	Count           int // Worker count ready to run in the pool
 	ConsumerChannel chan K
-	Consume         func(elem *K) error
-	OnError         func(elem *K, e error)
+	Consume         func(elem K) error
+	OnError         func(elem K, e error)
 	Closed          bool
 	closeCh         chan struct{}
 	waitGroup       sync.WaitGroup
 	workers         []*Thread
 }
 
-func NewPool[K any](count int, consumerChan chan K, consumerFn func(elem *K) error, onError func(elem *K, e error)) *Pool[K] {
+func NewPool[K any](count int, consumerChan chan K, consumerFn func(elem K) error, onError func(elem K, e error)) *Pool[K] {
 	p := Pool[K]{
 		Count:           count,
 		ConsumerChannel: consumerChan,
