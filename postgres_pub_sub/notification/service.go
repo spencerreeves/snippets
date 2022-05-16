@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"time"
@@ -14,24 +15,40 @@ type SubMessage struct {
 }
 
 type Notification struct {
-	ID             int64       `json:"id"`
-	JobID          int64       `json:"job_id"`
-	Status         string      `json:"status"`
-	PreviousStatus string      `json:"prev_status"`
-	CreateTime     time.Time   `json:"create_time"`
-	Data           interface{} `json:"data"`
+	ID                  int64       `json:"id"`
+	JobID               int64       `json:"job_id"`
+	Status              string      `json:"status"`
+	PreviousStatus      string      `json:"prev_status"`
+	CreateTime          time.Time   `json:"create_time"`
+	Data                interface{} `json:"data"`
+	ChannelName         string      `json:"channel_name"`
+	InternalChannelName string      `json:"notification_channel"`
+	ChannelID           uint32      `json:"channel_id"`
 }
 
 type service struct {
+	closeCh     chan struct{}
 	ChannelName string
-	cancelCtx   context.CancelFunc
+	ProcessFn   func(notification *Notification)
 	Repo        *repo
 }
 
-func NewService(repo *repo, channelName string) *service {
+func NewService(repo *repo, channelName string, processFn func(notification *Notification)) *service {
+	if processFn == nil {
+		processFn = func(n *Notification) {
+			j, err := json.Marshal(n)
+			if err != nil {
+				log.Warn().Err(err).Msg("failed to marshal notification")
+			} else {
+				log.Debug().RawJSON("notification", j).Send()
+			}
+		}
+	}
+
 	return &service{
 		ChannelName: channelName,
 		Repo:        repo,
+		ProcessFn:   processFn,
 	}
 }
 
@@ -47,23 +64,37 @@ func (s service) Start(ctx context.Context) error {
 
 	log.Debug().Msg("Notification:Start")
 
-	for {
-		notification, err := conn.WaitForNotification(ctx)
-		if err != nil {
-			return errors.Wrap(err, "error listening to channel")
-		}
+	go func() {
+		for {
+			select {
+			case _ = <-s.closeCh:
+				return
+			default:
+			}
 
-		log.Debug().Str("notification_channel", notification.Channel).Uint32("channel_id", notification.PID).Str("payload", notification.Payload).Send()
-		if err = process(notification.Payload); err != nil {
-			return errors.Wrap(err, "error in notification callback")
+			notification, err := conn.WaitForNotification(ctx)
+			if err != nil {
+				return
+			}
+
+			n := Notification{
+				ChannelID:           notification.PID,
+				ChannelName:         s.ChannelName,
+				InternalChannelName: notification.Channel,
+			}
+
+			//log.Debug().Str("notification_channel", notification.Channel).Uint32("channel_id", notification.PID).Str("payload", notification.Payload).Send()
+			if err = json.Unmarshal([]byte(notification.Payload), &n); err != nil {
+				log.Warn().Err(err).Msg("failed json unmarshal on notification")
+			}
+
+			s.ProcessFn(&n)
 		}
-	}
+	}()
+
+	return nil
 }
 
-func process(payload string) error {
-	// Metrics we care about
-	// How many notifications can we put per second
-	// How many notifications can we process per second
-	// When does the system start
-	return nil
+func (s service) Stop() {
+	s.closeCh <- struct{}{}
 }

@@ -5,6 +5,7 @@ import (
 	"github.com/jackc/pgx"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/spencerreeves/snippets/postgres_pub_sub/load"
 	"github.com/spencerreeves/snippets/postgres_pub_sub/notification"
 	"os"
 	"sync"
@@ -36,17 +37,26 @@ func main() {
 		log.Panic().Err(err).Msg("unable to connect to db")
 	}
 
-	notificationRepo := notification.NewRepo(connPool)
-	notificationService := notification.NewService(notificationRepo, c.ChannelName)
+	switch c.TestType {
+	case "load":
+		load.RunLoadTest(connPool, c.ChannelName)
+	default:
+		LogAllNotifications(connPool, c.ChannelName)
+	}
+}
+
+func LogAllNotifications(pool *pgx.ConnPool, channel string) {
+	notificationRepo := notification.NewRepo(pool)
+	notificationService := notification.NewService(notificationRepo, channel, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 
-		// This is a blocking call that will run into there is an error in the notification stream
+		// This is a blocking call that will run until there is an error in the notification stream
 		ctx := context.Background()
-		if err = notificationService.Start(ctx); err != nil {
+		if err := notificationService.Start(ctx); err != nil {
 			log.Error().Err(err).Msg("error in notification service")
 		}
 	}()
