@@ -14,6 +14,7 @@ var (
 type Thread struct {
 	ID      string
 	Metrics *Metric
+	Type    string
 }
 
 type Metric struct {
@@ -25,10 +26,11 @@ type Metric struct {
 	ErrorCount     int
 }
 
-func Consumer[K any](wg *sync.WaitGroup, closeCh chan struct{}, inputCh chan K, consumeFn func(K) error, errFn func(K, error)) *Thread {
+func Consumer[K any](wg *sync.WaitGroup, closeCh chan struct{}, inputCh chan K, consumeFn func(K) error, errFn func(string, error)) *Thread {
 	thread := Thread{
 		ID:      uuid.New().String(),
 		Metrics: &Metric{},
+		Type:    "consumer",
 	}
 
 	wg.Add(1)
@@ -38,41 +40,46 @@ func Consumer[K any](wg *sync.WaitGroup, closeCh chan struct{}, inputCh chan K, 
 		t := time.Now()
 		thread.Metrics.StartTime = time.Now()
 
-		for {
+		quit := false
+		for !quit {
 			select {
 			case _ = <-closeCh:
-				{
-					thread.Metrics.IdleDuration += time.Now().Sub(t)
-					thread.Metrics.EndTime = time.Now()
-					return
+				quit = true
+				break
+			case elem, ok := <-inputCh:
+				if !ok {
+					quit = true
+					break
 				}
-			case elem := <-inputCh:
-				{
-					thread.Metrics.IdleDuration += time.Now().Sub(t)
 
-					t = time.Now()
-					err := consumeFn(elem)
-					thread.Metrics.ProcessedCount++
-					thread.Metrics.BusyDuration += time.Now().Sub(t)
-					if err != nil {
-						thread.Metrics.ErrorCount++
-						errFn(elem, err)
-					}
+				thread.Metrics.IdleDuration += time.Now().Sub(t)
 
-					t = time.Now()
+				t = time.Now()
+				err := consumeFn(elem)
+				thread.Metrics.ProcessedCount++
+				thread.Metrics.BusyDuration += time.Now().Sub(t)
+				if err != nil {
+					thread.Metrics.ErrorCount++
+					errFn(thread.ID, err)
 				}
+
+				t = time.Now()
 			}
 		}
+
+		thread.Metrics.IdleDuration += time.Now().Sub(t)
+		thread.Metrics.EndTime = time.Now()
 	}()
 
 	return &thread
 }
 
 // Producer a nil chunkSize will make the producer loop forever
-func Producer[K any, T any](wg *sync.WaitGroup, closeCh chan struct{}, chunkSize *int, offset int, config T, outputCh chan K, produceFn func(index int, config T) (K, error), errFn func(int, error)) *Thread {
+func Producer[K any, T any](wg *sync.WaitGroup, closeCh chan struct{}, chunkSize *int, offset int, config T, outputCh chan K, produceFn func(index int, config T) (K, error), errFn func(string, error)) *Thread {
 	thread := Thread{
 		ID:      uuid.New().String(),
 		Metrics: &Metric{},
+		Type:    "producer",
 	}
 
 	wg.Add(1)
@@ -103,7 +110,7 @@ func Producer[K any, T any](wg *sync.WaitGroup, closeCh chan struct{}, chunkSize
 
 			if err != nil {
 				thread.Metrics.ErrorCount++
-				errFn(index, err)
+				errFn(thread.ID, err)
 			} else {
 				output := &elem
 				for !quit && output != nil {
@@ -111,7 +118,7 @@ func Producer[K any, T any](wg *sync.WaitGroup, closeCh chan struct{}, chunkSize
 					case _ = <-closeCh:
 						quit = true
 						thread.Metrics.ErrorCount++
-						errFn(index, failedWriteErr)
+						errFn(thread.ID, failedWriteErr)
 						continue
 					case outputCh <- *output:
 						output = nil

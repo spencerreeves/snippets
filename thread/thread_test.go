@@ -137,8 +137,8 @@ func incFn(counter *int) func(int) error {
 	}
 }
 
-func errCntFn(counter *int) func(v int, err error) {
-	return func(v int, err error) {
+func errCntFn(counter *int) func(id string, err error) {
+	return func(id string, err error) {
 		*counter++
 	}
 }
