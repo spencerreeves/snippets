@@ -40,12 +40,13 @@ func NewPool[K any, T any](
 	}
 
 	var thread *Thread
-	parts, chunkSize := chunks(iterations, producers)
+	chunks := Chunks(iterations, producers)
 	for i := 0; i < producers; i++ {
 		if iterations == nil {
 			thread = Producer[K, T](&p.waitGroup, p.closeCh, nil, 0, config, channel, produceFn, errorFn)
 		} else {
-			thread = Producer[K, T](&p.waitGroup, p.closeCh, &chunkSize, parts[i], config, channel, produceFn, errorFn)
+			chunkSize := chunks[i+1] - chunks[i]
+			thread = Producer[K, T](&p.waitGroup, p.closeCh, &chunkSize, chunks[i], config, channel, produceFn, errorFn)
 		}
 		p.workers = append(p.workers, thread)
 	}
@@ -102,16 +103,20 @@ func (p *Pool[K, T]) Metrics() []*Metric {
 	return metrics
 }
 
-func chunks(jobSize *int, workers int) ([]int, int) {
+// Chunks creates roughly equal parts for the jobSize, split by number of workers. The returned list will be the start
+// and end of each chunk. For example, a job size of 100 split in 3 would result in the following chunks [0, 33, 66, 100]
+func Chunks(jobSize *int, workers int) []int {
 	if jobSize == nil || *jobSize <= 0 || workers <= 0 {
-		return nil, 0
+		return nil
 	}
 
-	offset, chunkSize, parts := 0, int(math.Floor(float64(*jobSize)/float64(workers))), make([]int, workers)
+	offset, chunkSize, parts := 0, int(math.Floor(float64(*jobSize)/float64(workers))), make([]int, workers+1)
 	for i := 0; i < workers; i++ {
 		parts[i] = offset
 		offset += chunkSize
 	}
 
-	return parts, chunkSize
+	//
+	parts[workers] = *jobSize
+	return parts
 }

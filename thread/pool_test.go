@@ -123,3 +123,36 @@ func TestNewPool(t *testing.T) {
 	// cleanup
 	close(ch)
 }
+
+func TestChunks(t *testing.T) {
+	chunks := thread.Chunks(nil, 0)
+	if chunks != nil {
+		t.Error("empty job size should result in no chunks")
+		t.Fail()
+	}
+
+	jobSize := 100
+	chunks = thread.Chunks(&jobSize, 0)
+	if chunks != nil {
+		t.Error("no workers should result in no chunks")
+		t.Fail()
+	}
+
+	chunks = thread.Chunks(&jobSize, 2)
+	if len(chunks) != 3 || chunks[0] != 0 || chunks[1] != 50 || chunks[2] != 100 {
+		t.Error("unexpected even chunk size")
+		t.Fail()
+	}
+
+	chunks = thread.Chunks(&jobSize, 3)
+	if len(chunks) != 4 || chunks[0] != 0 || chunks[1] != 33 || chunks[2] != 66 || chunks[3] != 100 {
+		t.Error("unexpected odd chunk size ")
+		t.Fail()
+	}
+
+	chunks = thread.Chunks(&jobSize, 1)
+	if len(chunks) != 2 || chunks[0] != 0 || chunks[1] != 100 {
+		t.Error("expected single chunk")
+		t.Fail()
+	}
+}
