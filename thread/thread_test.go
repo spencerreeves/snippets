@@ -72,19 +72,18 @@ func TestConsumer(t *testing.T) {
 
 func TestProducer(t *testing.T) {
 	chunk, errs, closeCh, ch, wg := 10, 0, make(chan struct{}, 1), make(chan int, 100), sync.WaitGroup{}
-	var emptyTime time.Time
 
 	// Make sure we can create a Consumer
 	p := thread.Producer[int, interface{}](&wg, closeCh, &chunk, 0, nil, ch, produceFn, errCntFn(&errs))
 	time.Sleep(time.Millisecond)
-	if time.Now().Before(p.Metrics.StartTime) || p.Metrics.StartTime.Equal(emptyTime) {
+	if time.Now().Before(p.Metrics.StartTime) || p.Metrics.StartTime.IsZero() {
 		t.Error("invalid start time")
 		t.Fail()
 	}
 
 	// Verify items are processed
 	wg.Wait()
-	if p.Metrics.ProcessedCount != 10 || p.Metrics.EndTime.Equal(emptyTime) {
+	if p.Metrics.ProcessedCount != 10 || p.Metrics.EndTime.IsZero() {
 		t.Error("failed to process items")
 		t.Fail()
 	}
@@ -100,7 +99,7 @@ func TestProducer(t *testing.T) {
 	// Verify thread closes, unblock channel if waiting to add to channel
 	closeCh <- struct{}{}
 	time.Sleep(time.Millisecond)
-	if p.Metrics.EndTime.Equal(emptyTime) {
+	if p.Metrics.EndTime.IsZero() {
 		t.Error("invalid end time")
 		t.Fail()
 	}
@@ -143,6 +142,6 @@ func errCntFn(counter *int) func(id string, err error) {
 	}
 }
 
-func produceFn(i int, c interface{}) (int, error) {
+func produceFn(_ int, _ interface{}) (int, error) {
 	return 1, nil
 }

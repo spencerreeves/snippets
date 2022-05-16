@@ -7,7 +7,6 @@ import (
 )
 
 func TestNewPool(t *testing.T) {
-	var emptyTime time.Time
 	cnt, errs, ch := 0, 0, make(chan int, 1)
 
 	// Verify we can create a consumer only pool
@@ -64,7 +63,7 @@ func TestNewPool(t *testing.T) {
 	processedCount, processedErrs = 0, 0
 	for _, m := range p.Metrics() {
 		// Verify that all threads are closed
-		if m.EndTime.Equal(emptyTime) {
+		if m.EndTime.IsZero() {
 			t.Error("pool failed to close, threads still running")
 			t.Fail()
 		}
@@ -95,7 +94,7 @@ func TestNewPool(t *testing.T) {
 	processedCount, processedErrs = 0, 0
 	for _, m := range pc.Metrics() {
 		// Verify that all threads are closed
-		if m.EndTime.Equal(emptyTime) {
+		if m.EndTime.IsZero() {
 			t.Error("pool failed to close, threads still running")
 			t.Fail()
 		}
@@ -105,6 +104,20 @@ func TestNewPool(t *testing.T) {
 	if processedCount <= 0 || processedErrs > 2 {
 		t.Error("invalid processed count or processed errors")
 		t.Fail()
+	}
+
+	// cleanup
+	close(ch)
+
+	// Verify we can create a consumer/producer pool
+	chunk, cnt, ch := 10, 0, make(chan int, 10)
+	pc2 := thread.NewPool[int, interface{}](1, 1, &chunk, nil, ch, incFn(&cnt), errCntFn(&errs), produceFn)
+
+	// Verify we process all items and can quit
+	for !pc2.Closed {
+		if cnt == chunk {
+			pc2.Close(true)
+		}
 	}
 
 	// cleanup

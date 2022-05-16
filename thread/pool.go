@@ -36,7 +36,7 @@ func NewPool[K any, T any](
 		ErrorFn:     errorFn,
 		ProduceFn:   produceFn,
 		ThreadCount: consumers + producers,
-		closeCh:     make(chan struct{}),
+		closeCh:     make(chan struct{}, consumers+producers),
 	}
 
 	var thread *Thread
@@ -79,8 +79,10 @@ func (p *Pool[K, T]) Wait() {
 
 func (p *Pool[K, T]) Close(block bool) {
 	if !p.Closed {
-		for i := 0; i < p.ThreadCount; i++ {
-			p.closeCh <- struct{}{}
+		for _, w := range p.workers {
+			if w.Metrics.EndTime.IsZero() {
+				p.closeCh <- struct{}{}
+			}
 		}
 	}
 
