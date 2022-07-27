@@ -1,4 +1,4 @@
-package main
+package harvest
 
 import (
 	"bytes"
@@ -7,32 +7,28 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"strings"
 )
 
 type api struct {
 	AccountID   string
 	AccessToken string
 	client      *http.Client
-	URL         string
 }
 
-func NewClient(accountID string, accessToken string, client *http.Client, url string) *api {
+func NewClient(accountID string, accessToken string, client *http.Client) *api {
 	if client == nil {
 		client = &http.Client{}
-	}
-	if url == "" {
-		url = "https://api.harvestapp.com/"
 	}
 
 	return &api{
 		AccountID:   accountID,
 		AccessToken: accessToken,
 		client:      client,
-		URL:         url,
 	}
 }
 
-func (a api) DoRequest(method string, path string, reqObject any, respObject any) error {
+func (a api) doRequest(method string, path string, reqObject any, respObject any) error {
 	var body io.Reader
 	if method == "PUT" || method == "POST" {
 		jsonBytes, err := json.Marshal(reqObject)
@@ -42,7 +38,12 @@ func (a api) DoRequest(method string, path string, reqObject any, respObject any
 		body = bytes.NewBuffer(jsonBytes)
 	}
 
-	req, err := http.NewRequest(method, a.URL+path, body)
+	url := "https://api.harvestapp.com" + path
+	if strings.HasPrefix(path, "https://api.harvestapp.com") {
+		url = path
+	}
+
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return err
 	}
@@ -76,4 +77,18 @@ func (a api) DoRequest(method string, path string, reqObject any, respObject any
 	}
 
 	return nil
+}
+
+func (a api) GetTimeEntries() ([]TimeEntry, error) {
+	var entries []TimeEntry
+	var response TimeEntryResponse
+	var err error
+
+	for err = a.doRequest("GET", "/v2/time_entries", nil, response); err != nil && response.NextPage != ""; err = a.doRequest("GET", response.NextPage, nil, response) {
+		for _, e := range response.TimeEntries {
+			entries = append(entries, e)
+		}
+	}
+
+	return entries, err
 }
